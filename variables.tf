@@ -7,6 +7,7 @@
 /* -------------------------------------------------------------------------- */
 
 # Basic VM Configuration
+
 variable "hostname" {
   type        = string
   description = "Virtual machine hostname."
@@ -47,6 +48,7 @@ variable "tags" {
 /* -------------------------------------------------------------------------- */
 
 # Startup Configuration
+
 variable "startup_config" {
   type = object({
     order      = string
@@ -62,6 +64,7 @@ variable "startup_config" {
 }
 
 # CPU Configuration
+
 variable "cpu_cores" {
   type        = number
   default     = 1
@@ -90,13 +93,12 @@ variable "cpu_units" {
   description = "CPU weight for a container, must be between 8 and 50000. Number is relative to weights of all the other running containers."
 
   validation {
-    condition = (
-      var.cpu_units >= 8 &&
-      var.cpu_units <= 50000
-    )
+    condition     = var.cpu_units >= 8 && var.cpu_units <= 50000
     error_message = "Invalid value for cpu_units, must be between 8 and 50000."
   }
 }
+
+# Memory Configuration
 
 variable "memory_mb" {
   type        = number
@@ -113,8 +115,9 @@ variable "memory_swap_mb" {
   type        = number
   default     = null
   description = "The swap size in megabytes"
-
 }
+
+# Disk Configuration
 
 variable "disks" {
   type = set(object({
@@ -126,6 +129,7 @@ variable "disks" {
 }
 
 # Network Configuration
+
 variable "ip_addresses" {
   type = set(object({
     address = string
@@ -134,6 +138,8 @@ variable "ip_addresses" {
   default     = []
   description = "The IPv4 configuration for each network interface"
 }
+
+# Authentication Configuration
 
 variable "create_root_password" {
   type        = bool

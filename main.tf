@@ -3,9 +3,10 @@
 /* -------------------------------------------------------------------------- */
 
 locals {
-  # Default configurations
+  # Default network interface configuration
   default_network_interface = {
     bridge = "vmbr0"
+    # Additional optional settings:
     # enabled     = true
     # firewall    = false
     # mac_address = null
@@ -15,6 +16,7 @@ locals {
     # vlan_id     = null
   }
 
+  # Calculate swap size based on memory
   swap_size = (
     var.memory_mb <= 2048 ? var.memory_mb * 2 :
     var.memory_mb <= 4096 ? var.memory_mb :
@@ -22,36 +24,41 @@ locals {
     4096
   )
 
+  # Merge user-provided network interface settings with defaults
   network_interfaces = [for network_interface in var.network_interface : merge(local.default_network_interface, network_interface)]
-  selected_node      = one(random_shuffle.node.result)
+
+  # Select a single node from the randomly shuffled list
+  selected_node = one(random_shuffle.node.result)
 }
 
 /* -------------------------------------------------------------------------- */
 /*                            PROXMOX NODE SELECTION                          */
 /* -------------------------------------------------------------------------- */
 
-# Return all nodes in the proxmox cluster
+# Fetch all available nodes in the Proxmox cluster
 data "proxmox_virtual_environment_nodes" "available_nodes" {}
 
-# Choose a random node from the cluster
+# Randomly select one node from the available nodes
 resource "random_shuffle" "node" {
   input        = data.proxmox_virtual_environment_nodes.available_nodes.names
   result_count = 1
 }
 
 /* -------------------------------------------------------------------------- */
-/*                              SECRETS SELECTION                             */
+/*                              SECRETS GENERATION                            */
 /* -------------------------------------------------------------------------- */
 
+# Generate a random password if create_root_password is true
 resource "random_password" "create" {
-  count            = var.create_root_password == true ? 1 : 0
+  count            = var.create_root_password ? 1 : 0
   length           = 32
   override_special = "_%@"
   special          = true
 }
 
+# Generate SSH keys if create_ssh_keys is true
 resource "tls_private_key" "create" {
-  count     = var.create_ssh_keys == true ? 1 : 0
+  count     = var.create_ssh_keys ? 1 : 0
   algorithm = "RSA"
   rsa_bits  = 4096
 }
@@ -64,33 +71,35 @@ resource "proxmox_virtual_environment_container" "lxc" {
   name        = var.hostname
   description = var.description
   tags        = local.normalized_tags
+  node_name   = local.selected_node
 
-  node_name = local.selected_node
-
+  # Startup configuration
   startup {
     order      = var.startup_config.order
     up_delay   = var.startup_config.up_delay
     down_delay = var.startup_config.down_delay
   }
 
+  # CPU configuration
   cpu {
     architecture = var.cpu_architecture
     cores        = var.cpu_cores
     units        = var.cpu_units
   }
 
+  # Memory configuration
   memory {
     dedicated = var.memory_mb
     swap      = var.memory_swap_mb != null ? var.memory_swap_mb : local.swap_size
   }
 
+  # Operating system configuration
   operating_system {
     template_file_id = "${var.template_datastore}:vztmpl/${var.template_name}"
     type             = var.template_type
-
   }
 
-  # DATA disks
+  # Data disks configuration
   dynamic "disk" {
     for_each = var.disks
     iterator = "disk"
@@ -100,6 +109,7 @@ resource "proxmox_virtual_environment_container" "lxc" {
     }
   }
 
+  # Network interfaces configuration
   dynamic "network_interface" {
     for_each = { for idx, network_interface in local.network_interfaces : idx => network_interface }
     content {
@@ -108,6 +118,7 @@ resource "proxmox_virtual_environment_container" "lxc" {
     }
   }
 
+  # Initialization configuration
   initialization {
     # DNS configuration
     dns {
@@ -117,6 +128,7 @@ resource "proxmox_virtual_environment_container" "lxc" {
 
     # IP configuration
     ip_config {
+      # IPv4 configuration
       dynamic "ipv4" {
         for_each = var.ip_addresses != null ? var.ip_addresses : []
         content {
@@ -125,6 +137,7 @@ resource "proxmox_virtual_environment_container" "lxc" {
         }
       }
 
+      # DHCP fallback if no IP addresses are provided
       dynamic "ipv4" {
         for_each = var.ip_addresses == null ? [1] : []
         content {
@@ -132,25 +145,29 @@ resource "proxmox_virtual_environment_container" "lxc" {
         }
       }
 
+      # User account configuration
       user_account {
-        keys     = var.user_keys != null ? var.user : [trimspace(tls_private_key.create.public_key_openssh)]
-        password = var.user_password != null ? var.user_password : random_password.create.result
+        keys     = var.user_keys != null ? var.user_keys : [trimspace(tls_private_key.create[0].public_key_openssh)]
+        password = var.user_password != null ? var.user_password : random_password.create[0].result
       }
-
     }
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                                   OUTPUTS                                  */
+/* -------------------------------------------------------------------------- */
+
 output "container_password" {
-  value     = random_password.create.result
+  value     = var.create_root_password ? random_password.create[0].result : null
   sensitive = true
 }
 
 output "container_private_key" {
-  value     = tls_private_key.create.private_key_pem
+  value     = var.create_ssh_keys ? tls_private_key.create[0].private_key_pem : null
   sensitive = true
 }
 
 output "container_public_key" {
-  value = tls_private_key.create.public_key_openssh
+  value = var.create_ssh_keys ? tls_private_key.create[0].public_key_openssh : null
 }
