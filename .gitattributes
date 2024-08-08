@@ -1,0 +1,9 @@
+# Treat all Terraform files as text files
+*.tf text
+
+# Set line endings for Windows and Unix
+*.tf text=auto
+
+# Ensure .tfvars and .tfstate files are treated as binary (no merge conflicts)
+*.tfvars binary
+*.tfstate binary
